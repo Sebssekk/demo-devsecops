@@ -81,6 +81,7 @@ jobs:
   # JOB 3: DAST (Dynamic Analysis - Running App)
   # ===============================================
   dast_job:
+    name: owaspzap-DAST
     runs-on: ubuntu-latest
     #needs: sca_job # This job must wait for SCA to complete successfully
     
