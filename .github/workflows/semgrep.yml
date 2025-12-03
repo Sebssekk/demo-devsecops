@@ -1,93 +1,101 @@
-name: Semgrep CE scan
+name: Comprehensive DevSecOps Pipeline (SAST, SCA, DAST)
 
 on:
-  # Scan in PRs:
-  pull_request: {}
-  # Scan on-demand through GitHub Actions interface:
-  workflow_dispatch: {}
-  # Scan mainline branches and report all findings:
+  pull_request:
+    branches: [ main, master ]
   push:
-    branches: ["master", "main"]  
-
-permissions:
-  contents: read
-  security-events: write
-  actions: read
+    branches: [ main, master ]
 
 jobs:
-  semgrep:
-    # User definable name of this GitHub Actions job.
-    name: semgrep-oss/scan
-    # If you are self-hosting, change the following `runs-on` value: 
+  security_checks:
     runs-on: ubuntu-latest
+    
+    # Define a default variable for the target URL for DAST
+    env:
+      DAST_TARGET_URL: http://localhost:5000
 
-    container:
-      # A Docker image with Semgrep installed. Do not change this.
-      image: semgrep/semgrep
-
-    # Skip any PR created by dependabot to avoid permission issues:
-    if: (github.actor != 'dependabot[bot]')
-
-    steps:
-      # Fetch project source with GitHub Actions Checkout. Use either v3 or v4.
-      - uses: actions/checkout@v4
-      # Run the "semgrep scan" command on the command line of the docker image.
-      - run: semgrep scan --config auto --sarif > semgrep.sarif
-      
-      - name: Upload SARIF file for GitHub Advanced Security Dashboard
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-        if: always()
-  trivy_sca_scan:
-    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for advanced scanners
 
-      # Step 1: Install Application Dependencies
-      # This step is CRITICAL as SCA tools scan the lock files created when dependencies are installed.
-      - name: Install Dependencies (Example Node.js/Python)
-        run: |
-          pip install -r requirements.txt --target ./app/dependencies 
+      # ===============================================
+      # 1. SETUP: Python Environment and Dependencies
+      # ===============================================
+      - name: Set up Python Environment and Install Dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      
+      - name: Install Application Dependencies
+        run: pip install -r requirements.txt
+        working-directory: . # Assumes requirements.txt is in the root
 
-      # Step 2: Run Trivy Filesystem Scan for Dependencies
-      # This runs the SCA check against the dependency lock files (package-lock.json, Gemfile.lock, etc.)
-      - name: Run Trivy SCA Scan and Gate Policy
+      # ===============================================
+      # 2. SAST (Static Analysis - Code Quality)
+      # ===============================================
+      - name: Run Semgrep SAST Scan (Code Analysis)
+        uses: semgrep/semgrep-action@v2
+        id: semgrep_sast
+        with:
+          config: auto
+          # Policy: Fail the build on any High/Critical finding
+          fail_on: "error"
+          # Output SARIF for GitHub Security Dashboard integration
+          output: semgrep-sast.sarif
+          publish: 'always' # Upload to dashboard
+
+      # ===============================================
+      # 3. SCA (Software Composition Analysis - Dependencies)
+      # ===============================================
+      - name: Run Trivy SCA Scan (Dependency Check)
         uses: aquasecurity/trivy-action@master
         with:
-          # Define the target as the filesystem (fs)
           scan-type: 'fs'
-          # Scan only the application directory where lock files were generated
-          input: './app'
-          # CRITICAL GATING: Exit code 1 means the job fails if policy is violated
+          input: '.' # Scan the entire filesystem (where requirements.txt was processed)
+          # Policy: Fail the build if Critical or High severity vulnerabilities are found
           exit-code: '1'
-          # Define the policy: Only Critical and High severity findings will fail the build
           severity: 'CRITICAL,HIGH'
-          # Generate the SBOM output in CycloneDX format
-          output: 'trivy-sca-report.json'
-          format: 'json'
-          
-      # Step 3: Upload the SCA Report (SBOM/Vulnerability Data) as an Artifact
-      # This ensures the report is permanently attached to the build for auditing/ASOC tools
-      - name: Upload SCA Report Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-sca-report
-          path: trivy-sca-report.json
-          # Upload artifact even if the SCA scan failed (to show why it failed)
-          if: always()
-
-      # Step 4: Optional - Upload results to GitHub Security Dashboard (SARIF)
-      # Trivy can output SARIF directly for integration with GitHub's built-in UI
-      - name: Convert & Upload SARIF to GitHub Security Dashboard
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          input: './app'
-          # Output in SARIF format
+          # Output SARIF for GitHub Security Dashboard integration
           format: 'sarif'
-          output: 'trivy-sca-sarif.sarif'
-          # Upload the SARIF file
+          output: 'trivy-sca.sarif'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           upload-sarif: true
+          
+      # ===============================================
+      # 4. DAST (Dynamic Analysis - Running App)
+      # ===============================================
+      
+      # Step 4.1: Start the Flask application in the background
+      - name: Start Flask Application
+        run: |
+          echo "Starting application on port 5000..."
+          python main.py & 
+          # Give the application time to start up before ZAP hits it
+          sleep 15 
+        working-directory: .
+
+      # Step 4.2: Run OWASP ZAP Baseline DAST Scan
+      - name: Run ZAP DAST Scan
+        uses: zaproxy/action-baseline@v0.11.0 
+        id: zap_scan
+        with:
+          target: ${{ env.DAST_TARGET_URL }}
+          # CRITICAL GATING: Fail the GitHub Action if ZAP finds any alerts
+          fail_action: true 
+          # Custom rules file to define which alerts (severity/type) should fail the build
+          rules_file: '.zap/ci_policy_rules.yaml' 
+          
+      # Step 4.3: Upload ZAP SARIF Report to GitHub Dashboard
+      # The ZAP action above generates a report named 'gl-dast-report.json' or similar.
+      # We need a separate step to convert/upload a SARIF format report if we want 
+      # it in the Security Dashboard alongside Semgrep/Trivy. For simplicity,
+      # we'll upload the HTML report as an artifact and ensure the failure gate is in place.
+      # NOTE: For advanced DAST, a dedicated ZAP API Runner is needed for SARIF.
+      - name: Upload DAST HTML Report Artifact (Audit)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-html-report
+          path: zap_report.html
+          if: success() || failure()
