@@ -12,6 +12,9 @@ try:
 except:
     print("Failed to connect.")
 
+db = sqlite3.connect(DATABASE)
+
+
 @app.route('/user_data', methods=['GET'])
 def get_user_data():
     # [Line 15] User ID is taken directly from an untrusted query parameter.
