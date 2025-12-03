@@ -39,3 +39,55 @@ jobs:
         with:
           sarif_file: semgrep.sarif
         if: always()
+  trivy_sca_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 1: Install Application Dependencies
+      # This step is CRITICAL as SCA tools scan the lock files created when dependencies are installed.
+      - name: Install Dependencies (Example Node.js/Python)
+        run: |
+          pip install -r requirements.txt --target ./app/dependencies 
+
+      # Step 2: Run Trivy Filesystem Scan for Dependencies
+      # This runs the SCA check against the dependency lock files (package-lock.json, Gemfile.lock, etc.)
+      - name: Run Trivy SCA Scan and Gate Policy
+        uses: aquasecurity/trivy-action@master
+        with:
+          # Define the target as the filesystem (fs)
+          scan-type: 'fs'
+          # Scan only the application directory where lock files were generated
+          input: './app'
+          # CRITICAL GATING: Exit code 1 means the job fails if policy is violated
+          exit-code: '1'
+          # Define the policy: Only Critical and High severity findings will fail the build
+          severity: 'CRITICAL,HIGH'
+          # Generate the SBOM output in CycloneDX format
+          output: 'trivy-sca-report.json'
+          format: 'json'
+          
+      # Step 3: Upload the SCA Report (SBOM/Vulnerability Data) as an Artifact
+      # This ensures the report is permanently attached to the build for auditing/ASOC tools
+      - name: Upload SCA Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sca-report
+          path: trivy-sca-report.json
+          # Upload artifact even if the SCA scan failed (to show why it failed)
+          if: always()
+
+      # Step 4: Optional - Upload results to GitHub Security Dashboard (SARIF)
+      # Trivy can output SARIF directly for integration with GitHub's built-in UI
+      - name: Convert & Upload SARIF to GitHub Security Dashboard
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          input: './app'
+          # Output in SARIF format
+          format: 'sarif'
+          output: 'trivy-sca-sarif.sarif'
+          # Upload the SARIF file
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          upload-sarif: true
