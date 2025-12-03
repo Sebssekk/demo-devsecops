@@ -87,7 +87,7 @@ jobs:
     
     # Define a default variable for the target URL for DAST
     env:
-      DAST_TARGET_URL: http://localhost:5000
+      DAST_TARGET_URL: http://localhost:5000/user_data
 
     steps:
       - name: Checkout Code
