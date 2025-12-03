@@ -121,7 +121,7 @@ jobs:
           # CRITICAL GATING: Fail the GitHub Action if ZAP finds any alerts
           fail_action: true 
           # Custom rules file to define which alerts (severity/type) should fail the build
-          rules_file: '.zap/ci_policy_rules.yaml' 
+          #rules_file_name: '.zap/ci_policy_rules.yaml' 
           
       # Step 4.3: Upload DAST HTML Report Artifact (Audit)
       - name: Upload DAST HTML Report Artifact (Audit)
@@ -129,4 +129,4 @@ jobs:
         with:
           name: zap-html-report
           path: zap_report.html
-          if: success() || failure()
+        if: always() 
