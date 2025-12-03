@@ -7,9 +7,10 @@ import sqlite3
 app = Flask(__name__)
 
 DATABASE = 'database.db'
-
-db = sqlite3.connect(DATABASE)
-
+try:
+    db = sqlite3.connect(DATABASE)
+except:
+    print("Failed to connect.")
 
 @app.route('/user_data', methods=['GET'])
 def get_user_data():
