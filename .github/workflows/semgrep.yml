@@ -128,5 +128,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zap-html-report
-          path: zap_report.html
+          path: report_html.html
         if: always() 
