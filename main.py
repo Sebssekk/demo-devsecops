@@ -7,6 +7,9 @@ import sqlite3
 app = Flask(__name__)
 
 DATABASE = 'database.db'
+
+#key="..."
+
 try:
     db = sqlite3.connect(DATABASE)
 except:
